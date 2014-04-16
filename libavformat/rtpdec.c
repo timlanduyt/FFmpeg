@@ -32,6 +32,8 @@
 
 #define MIN_FEEDBACK_INTERVAL 200000 /* 200 ms in us */
 
+unsigned long long previousNumSecondsSince1601 = 0;
+
 static RTPDynamicProtocolHandler gsm_dynamic_handler = {
     .enc_name   = "GSM",
     .codec_type = AVMEDIA_TYPE_AUDIO,
@@ -636,6 +638,17 @@ static int rtp_parse_packet_internal(RTPDemuxContext *s, AVPacket *pkt,
 
         if (len < ext)
             return -1;
+
+        if (AV_RB16(buf) == 43948) { //0xABAC
+            unsigned long long numSecondsSince1601 = AV_RB64(buf+4)/10000000LL;
+            //write timestamp to system out
+            if (numSecondsSince1601!=previousNumSecondsSince1601) {
+                //11644477200LL represents the number of seconds that has passed from 12h.AM 01/01/1601 until 12AM 01/01/1970 to use UTC time
+                av_log(NULL, AV_LOG_ERROR, "StreamUtc:%llu\n", (numSecondsSince1601-11644477200LL));
+            }
+            previousNumSecondsSince1601 = numSecondsSince1601;
+        }
+
         // skip past RTP header extension
         len -= ext;
         buf += ext;
