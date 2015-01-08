@@ -27,6 +27,7 @@
 
 #define CABAC(h) 1
 #define UNCHECKED_BITSTREAM_READER 1
+#define INT_BIT (CHAR_BIT * sizeof(int))
 
 #include "libavutil/attributes.h"
 #include "libavutil/avassert.h"
@@ -1604,7 +1605,7 @@ decode_cabac_residual_internal(H264Context *h, int16_t *block,
 
     int index[64];
 
-    int av_unused last;
+    int last;
     int coeff_count = 0;
     int node_ctx = 0;
 
@@ -2194,7 +2195,7 @@ decode_intra_mb:
                         }
                     }else
                         ref=0;
-                        fill_rectangle(&h->ref_cache[list][ scan8[0] ], 4, 4, 8, ref, 1);
+                    fill_rectangle(&h->ref_cache[list][ scan8[0] ], 4, 4, 8, ref, 1);
                 }
             }
             for(list=0; list<h->list_count; list++){

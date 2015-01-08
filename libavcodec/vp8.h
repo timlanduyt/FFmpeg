@@ -3,7 +3,7 @@
  *
  * Copyright (C) 2010 David Conrad
  * Copyright (C) 2010 Ronald S. Bultje
- * Copyright (C) 2010 Jason Garrett-Glaser
+ * Copyright (C) 2010 Fiona Glaser
  * Copyright (C) 2012 Daniel Kang
  *
  * This file is part of FFmpeg.
@@ -265,6 +265,9 @@ typedef struct VP8Context {
     H264PredContext hpc;
     vp8_mc_func put_pixels_tab[3][3][3];
     VP8Frame frames[5];
+
+    uint8_t colorspace; ///< 0 is the only value allowed (meaning bt601)
+    uint8_t fullrange;  ///< whether we can skip clamping in dsp functions
 
     int num_jobs;
     /**

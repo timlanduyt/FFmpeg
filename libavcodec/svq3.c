@@ -1176,7 +1176,7 @@ static int svq3_decode_frame(AVCodecContext *avctx, void *data,
 
     h->cur_pic_ptr = s->cur_pic;
     av_frame_unref(&h->cur_pic.f);
-    h->cur_pic     = *s->cur_pic;
+    memcpy(&h->cur_pic.tf, &s->cur_pic->tf, sizeof(h->cur_pic) - offsetof(H264Picture, tf));
     ret = av_frame_ref(&h->cur_pic.f, &s->cur_pic->f);
     if (ret < 0)
         return ret;
@@ -1195,7 +1195,7 @@ static int svq3_decode_frame(AVCodecContext *avctx, void *data,
     if (h->pict_type != AV_PICTURE_TYPE_I) {
         if (!s->last_pic->f.data[0]) {
             av_log(avctx, AV_LOG_ERROR, "Missing reference frame.\n");
-            av_frame_unref(s->last_pic);
+            av_frame_unref(&s->last_pic->f);
             ret = get_buffer(avctx, s->last_pic);
             if (ret < 0)
                 return ret;
@@ -1208,7 +1208,7 @@ static int svq3_decode_frame(AVCodecContext *avctx, void *data,
 
         if (h->pict_type == AV_PICTURE_TYPE_B && !s->next_pic->f.data[0]) {
             av_log(avctx, AV_LOG_ERROR, "Missing reference frame.\n");
-            av_frame_unref(s->next_pic);
+            av_frame_unref(&s->next_pic->f);
             ret = get_buffer(avctx, s->next_pic);
             if (ret < 0)
                 return ret;

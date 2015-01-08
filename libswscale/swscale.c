@@ -27,6 +27,7 @@
 #include "libavutil/avutil.h"
 #include "libavutil/bswap.h"
 #include "libavutil/cpu.h"
+#include "libavutil/imgutils.h"
 #include "libavutil/intreadwrite.h"
 #include "libavutil/mathematics.h"
 #include "libavutil/pixdesc.h"
@@ -221,21 +222,6 @@ static void lumRangeFromJpeg16_c(int16_t *_dst, int width)
         dst[i] = (dst[i]*(14071/4) + (33561947<<4)/4)>>12;
 }
 
-static void hyscale_fast_c(SwsContext *c, int16_t *dst, int dstWidth,
-                           const uint8_t *src, int srcW, int xInc)
-{
-    int i;
-    unsigned int xpos = 0;
-    for (i = 0; i < dstWidth; i++) {
-        register unsigned int xx     = xpos >> 16;
-        register unsigned int xalpha = (xpos & 0xFFFF) >> 9;
-        dst[i] = (src[xx] << 7) + (src[xx + 1] - src[xx]) * xalpha;
-        xpos  += xInc;
-    }
-    for (i=dstWidth-1; (i*xInc)>>16 >=srcW-1; i--)
-        dst[i] = src[srcW-1]*128;
-}
-
 // *** horizontal scale Y line to temp buffer
 static av_always_inline void hyscale(SwsContext *c, int16_t *dst, int dstWidth,
                                      const uint8_t *src_in[4],
@@ -271,25 +257,6 @@ static av_always_inline void hyscale(SwsContext *c, int16_t *dst, int dstWidth,
 
     if (convertRange)
         convertRange(dst, dstWidth);
-}
-
-static void hcscale_fast_c(SwsContext *c, int16_t *dst1, int16_t *dst2,
-                           int dstWidth, const uint8_t *src1,
-                           const uint8_t *src2, int srcW, int xInc)
-{
-    int i;
-    unsigned int xpos = 0;
-    for (i = 0; i < dstWidth; i++) {
-        register unsigned int xx     = xpos >> 16;
-        register unsigned int xalpha = (xpos & 0xFFFF) >> 9;
-        dst1[i] = (src1[xx] * (xalpha ^ 127) + src1[xx + 1] * xalpha);
-        dst2[i] = (src2[xx] * (xalpha ^ 127) + src2[xx + 1] * xalpha);
-        xpos   += xInc;
-    }
-    for (i=dstWidth-1; (i*xInc)>>16 >=srcW-1; i--) {
-        dst1[i] = src1[srcW-1]*128;
-        dst2[i] = src2[srcW-1]*128;
-    }
 }
 
 static av_always_inline void hcscale(SwsContext *c, int16_t *dst1,
@@ -414,8 +381,8 @@ static int swscale(SwsContext *c, const uint8_t *src[],
     DEBUG_BUFFERS("vLumFilterSize: %d vLumBufSize: %d vChrFilterSize: %d vChrBufSize: %d\n",
                   vLumFilterSize, vLumBufSize, vChrFilterSize, vChrBufSize);
 
-    if (dstStride[0]%16 !=0 || dstStride[1]%16 !=0 ||
-        dstStride[2]%16 !=0 || dstStride[3]%16 != 0) {
+    if (dstStride[0]&15 || dstStride[1]&15 ||
+        dstStride[2]&15 || dstStride[3]&15) {
         static int warnedAlready = 0; // FIXME maybe move this into the context
         if (flags & SWS_PRINT_INFO && !warnedAlready) {
             av_log(c, AV_LOG_WARNING,
@@ -425,10 +392,10 @@ static int swscale(SwsContext *c, const uint8_t *src[],
         }
     }
 
-    if (   (uintptr_t)dst[0]%16 || (uintptr_t)dst[1]%16 || (uintptr_t)dst[2]%16
-        || (uintptr_t)src[0]%16 || (uintptr_t)src[1]%16 || (uintptr_t)src[2]%16
-        || dstStride[0]%16 || dstStride[1]%16 || dstStride[2]%16 || dstStride[3]%16
-        || srcStride[0]%16 || srcStride[1]%16 || srcStride[2]%16 || srcStride[3]%16
+    if (   (uintptr_t)dst[0]&15 || (uintptr_t)dst[1]&15 || (uintptr_t)dst[2]&15
+        || (uintptr_t)src[0]&15 || (uintptr_t)src[1]&15 || (uintptr_t)src[2]&15
+        || dstStride[0]&15 || dstStride[1]&15 || dstStride[2]&15 || dstStride[3]&15
+        || srcStride[0]&15 || srcStride[1]&15 || srcStride[2]&15 || srcStride[3]&15
     ) {
         static int warnedAlready=0;
         int cpu_flags = av_get_cpu_flags();
@@ -745,8 +712,8 @@ static av_cold void sws_init_swscale(SwsContext *c)
         if (c->dstBpc <= 14) {
             c->hyScale = c->hcScale = hScale8To15_c;
             if (c->flags & SWS_FAST_BILINEAR) {
-                c->hyscale_fast = hyscale_fast_c;
-                c->hcscale_fast = hcscale_fast_c;
+                c->hyscale_fast = ff_hyscale_fast_c;
+                c->hcscale_fast = ff_hcscale_fast_c;
             }
         } else {
             c->hyScale = c->hcScale = hScale8To19_c;
@@ -838,9 +805,9 @@ static void xyz12Torgb48(struct SwsContext *c, uint16_t *dst,
                 c->xyz2rgb_matrix[2][2] * z >> 12;
 
             // limit values to 12-bit depth
-            r = av_clip_c(r,0,4095);
-            g = av_clip_c(g,0,4095);
-            b = av_clip_c(b,0,4095);
+            r = av_clip(r, 0, 4095);
+            g = av_clip(g, 0, 4095);
+            b = av_clip(b, 0, 4095);
 
             // convert from sRGBlinear to RGB and scale from 12bit to 16bit
             if (desc->flags & AV_PIX_FMT_FLAG_BE) {
@@ -894,9 +861,9 @@ static void rgb48Toxyz12(struct SwsContext *c, uint16_t *dst,
                 c->rgb2xyz_matrix[2][2] * b >> 12;
 
             // limit values to 12-bit depth
-            x = av_clip_c(x,0,4095);
-            y = av_clip_c(y,0,4095);
-            z = av_clip_c(z,0,4095);
+            x = av_clip(x, 0, 4095);
+            y = av_clip(y, 0, 4095);
+            z = av_clip(z, 0, 4095);
 
             // convert from XYZlinear to X'Y'Z' and scale from 12bit to 16bit
             if (desc->flags & AV_PIX_FMT_FLAG_BE) {
@@ -933,6 +900,18 @@ int attribute_align_arg sws_scale(struct SwsContext *c,
         av_log(c, AV_LOG_ERROR, "One of the input parameters to sws_scale() is NULL, please check the calling code\n");
         return 0;
     }
+    if (c->cascaded_context[0] && srcSliceY == 0 && srcSliceH == c->cascaded_context[0]->srcH) {
+        ret = sws_scale(c->cascaded_context[0],
+                        srcSlice, srcStride, srcSliceY, srcSliceH,
+                        c->cascaded_tmp, c->cascaded_tmpStride);
+        if (ret < 0)
+            return ret;
+        ret = sws_scale(c->cascaded_context[1],
+                        (const uint8_t * const * )c->cascaded_tmp, c->cascaded_tmpStride, 0, c->cascaded_context[0]->dstH,
+                        dst, dstStride);
+        return ret;
+    }
+
     memcpy(src2, srcSlice, sizeof(src2));
     memcpy(dst2, dst, sizeof(dst2));
 

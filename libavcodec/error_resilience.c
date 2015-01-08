@@ -448,7 +448,7 @@ static void guess_mv(ERContext *s)
                     int best_score         = 256 * 256 * 256 * 64;
                     int best_pred          = 0;
                     const int mot_index    = (mb_x + mb_y * mot_stride) * mot_step;
-                    int prev_x, prev_y, prev_ref;
+                    int prev_x = 0, prev_y = 0, prev_ref = 0;
 
                     if ((mb_x ^ mb_y ^ pass) & 1)
                         continue;
@@ -686,6 +686,9 @@ static int is_intra_more_likely(ERContext *s)
     if (!s->last_pic.f || !s->last_pic.f->data[0])
         return 1; // no previous frame available -> use spatial prediction
 
+    if (s->avctx->error_concealment & FF_EC_FAVOR_INTER)
+        return 0;
+
     undamaged_count = 0;
     for (i = 0; i < s->mb_num; i++) {
         const int mb_xy = s->mb_index2xy[i];
@@ -736,12 +739,12 @@ static int is_intra_more_likely(ERContext *s)
                 } else {
                     ff_thread_await_progress(s->last_pic.tf, mb_y, 0);
                 }
-                is_intra_likely += s->dsp->sad[0](NULL, last_mb_ptr, mb_ptr,
-                                                 linesize[0], 16);
+                is_intra_likely += s->mecc->sad[0](NULL, last_mb_ptr, mb_ptr,
+                                                   linesize[0], 16);
                 // FIXME need await_progress() here
-                is_intra_likely -= s->dsp->sad[0](NULL, last_mb_ptr,
-                                                 last_mb_ptr + linesize[0] * 16,
-                                                 linesize[0], 16);
+                is_intra_likely -= s->mecc->sad[0](NULL, last_mb_ptr,
+                                                   last_mb_ptr + linesize[0] * 16,
+                                                   linesize[0], 16);
             } else {
                 if (IS_INTRA(s->cur_pic.mb_type[mb_xy]))
                    is_intra_likely++;
@@ -855,7 +858,7 @@ void ff_er_add_slice(ERContext *s, int startx, int starty,
 
 void ff_er_frame_end(ERContext *s)
 {
-    int *linesize = s->cur_pic.f->linesize;
+    int *linesize = NULL;
     int i, mb_x, mb_y, error, error_type, dc_error, mv_error, ac_error;
     int distance;
     int threshold_part[4] = { 100, 100, 100 };
@@ -872,6 +875,7 @@ void ff_er_frame_end(ERContext *s)
                           (s->avctx->skip_top + s->avctx->skip_bottom)) {
         return;
     }
+    linesize = s->cur_pic.f->linesize;
     for (mb_x = 0; mb_x < s->mb_width; mb_x++) {
         int status = s->error_status_table[mb_x + (s->mb_height - 1) * s->mb_stride];
         if (status != 0x7F)
@@ -1054,7 +1058,7 @@ void ff_er_frame_end(ERContext *s)
     if (!s->partitioned_frame) {
         for (i = 0; i < s->mb_num; i++) {
             const int mb_xy = s->mb_index2xy[i];
-            error = s->error_status_table[mb_xy];
+            int error = s->error_status_table[mb_xy];
             if (error & ER_MB_ERROR)
                 error |= ER_MB_ERROR;
             s->error_status_table[mb_xy] = error;
@@ -1065,7 +1069,7 @@ void ff_er_frame_end(ERContext *s)
     dc_error = ac_error = mv_error = 0;
     for (i = 0; i < s->mb_num; i++) {
         const int mb_xy = s->mb_index2xy[i];
-        error = s->error_status_table[mb_xy];
+        int error = s->error_status_table[mb_xy];
         if (error & ER_DC_ERROR)
             dc_error++;
         if (error & ER_AC_ERROR)
@@ -1081,7 +1085,7 @@ void ff_er_frame_end(ERContext *s)
     /* set unknown mb-type to most likely */
     for (i = 0; i < s->mb_num; i++) {
         const int mb_xy = s->mb_index2xy[i];
-        error = s->error_status_table[mb_xy];
+        int error = s->error_status_table[mb_xy];
         if (!((error & ER_DC_ERROR) && (error & ER_MV_ERROR)))
             continue;
 
@@ -1109,7 +1113,7 @@ void ff_er_frame_end(ERContext *s)
             const int mv_dir  = dir ? MV_DIR_BACKWARD : MV_DIR_FORWARD;
             int mv_type;
 
-            error = s->error_status_table[mb_xy];
+            int error = s->error_status_table[mb_xy];
 
             if (IS_INTRA(mb_type))
                 continue; // intra
@@ -1146,7 +1150,7 @@ void ff_er_frame_end(ERContext *s)
                 const int mb_type = s->cur_pic.mb_type[mb_xy];
                 int mv_dir = MV_DIR_FORWARD | MV_DIR_BACKWARD;
 
-                error = s->error_status_table[mb_xy];
+                int error = s->error_status_table[mb_xy];
 
                 if (IS_INTRA(mb_type))
                     continue;
@@ -1197,7 +1201,7 @@ void ff_er_frame_end(ERContext *s)
             const int mb_xy   = mb_x + mb_y * s->mb_stride;
             const int mb_type = s->cur_pic.mb_type[mb_xy];
 
-            error = s->error_status_table[mb_xy];
+            // error = s->error_status_table[mb_xy];
 
             if (IS_INTRA(mb_type) && s->partitioned_frame)
                 continue;
@@ -1250,7 +1254,7 @@ void ff_er_frame_end(ERContext *s)
             const int mb_xy   = mb_x + mb_y * s->mb_stride;
             const int mb_type = s->cur_pic.mb_type[mb_xy];
 
-            error = s->error_status_table[mb_xy];
+            int error = s->error_status_table[mb_xy];
 
             if (IS_INTER(mb_type))
                 continue;

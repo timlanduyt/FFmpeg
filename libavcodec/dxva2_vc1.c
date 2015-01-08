@@ -192,15 +192,17 @@ static int commit_bitstream_and_slice_buffer(AVCodecContext *avctx,
     const unsigned padding = 128 - ((start_code_size + slice_size) & 127);
     const unsigned data_size = start_code_size + slice_size + padding;
 
+    void     *dxva_data_ptr;
     uint8_t  *dxva_data;
     unsigned dxva_size;
     int result;
 
     if (FAILED(IDirectXVideoDecoder_GetBuffer(ctx->decoder,
                                               DXVA2_BitStreamDateBufferType,
-                                              (void **)&dxva_data, &dxva_size)))
+                                              &dxva_data_ptr, &dxva_size)))
         return -1;
 
+    dxva_data = dxva_data_ptr;
     result = data_size <= dxva_size ? 0 : -1;
     if (!result) {
         if (start_code_size > 0) {
@@ -301,7 +303,7 @@ AVHWAccel ff_wmv3_dxva2_hwaccel = {
     .start_frame    = dxva2_vc1_start_frame,
     .decode_slice   = dxva2_vc1_decode_slice,
     .end_frame      = dxva2_vc1_end_frame,
-    .priv_data_size = sizeof(struct dxva2_picture_context),
+    .frame_priv_data_size = sizeof(struct dxva2_picture_context),
 };
 #endif
 
@@ -313,5 +315,5 @@ AVHWAccel ff_vc1_dxva2_hwaccel = {
     .start_frame    = dxva2_vc1_start_frame,
     .decode_slice   = dxva2_vc1_decode_slice,
     .end_frame      = dxva2_vc1_end_frame,
-    .priv_data_size = sizeof(struct dxva2_picture_context),
+    .frame_priv_data_size = sizeof(struct dxva2_picture_context),
 };

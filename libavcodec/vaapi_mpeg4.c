@@ -88,7 +88,7 @@ static int vaapi_mpeg4_start_frame(AVCodecContext *avctx, av_unused const uint8_
     pic_param->vop_fields.bits.alternate_vertical_scan_flag = s->alternate_scan;
     pic_param->vop_fcode_forward                        = s->f_code;
     pic_param->vop_fcode_backward                       = s->b_code;
-    pic_param->vop_time_increment_resolution            = avctx->time_base.den;
+    pic_param->vop_time_increment_resolution            = avctx->framerate.num;
     pic_param->num_macroblocks_in_gob                   = s->mb_width * ff_h263_get_gob_height(s);
     pic_param->num_gobs_in_vop                          = (s->mb_width * s->mb_height) / pic_param->num_macroblocks_in_gob;
     pic_param->TRB                                      = s->pb_time;
@@ -109,7 +109,7 @@ static int vaapi_mpeg4_start_frame(AVCodecContext *avctx, av_unused const uint8_
         iq_matrix->load_non_intra_quant_mat     = 1;
 
         for (i = 0; i < 64; i++) {
-            int n = s->dsp.idct_permutation[ff_zigzag_direct[i]];
+            int n = s->idsp.idct_permutation[ff_zigzag_direct[i]];
             iq_matrix->intra_quant_mat[i]       = s->intra_matrix[n];
             iq_matrix->non_intra_quant_mat[i]   = s->inter_matrix[n];
         }

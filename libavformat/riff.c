@@ -321,6 +321,7 @@ const AVCodecTag ff_codec_bmp_tags[] = {
     { AV_CODEC_ID_TARGA,        MKTAG('t', 'g', 'a', ' ') },
     { AV_CODEC_ID_PNG,          MKTAG('M', 'P', 'N', 'G') },
     { AV_CODEC_ID_PNG,          MKTAG('P', 'N', 'G', '1') },
+    { AV_CODEC_ID_PNG,          MKTAG('p', 'n', 'g', ' ') }, /* ImageJ */
     { AV_CODEC_ID_CLJR,         MKTAG('C', 'L', 'J', 'R') },
     { AV_CODEC_ID_DIRAC,        MKTAG('d', 'r', 'a', 'c') },
     { AV_CODEC_ID_RPZA,         MKTAG('a', 'z', 'p', 'r') },
@@ -340,6 +341,7 @@ const AVCodecTag ff_codec_bmp_tags[] = {
     /* Ut Video version 13.0.1 BT.709 codecs */
     { AV_CODEC_ID_UTVIDEO,      MKTAG('U', 'L', 'H', '0') },
     { AV_CODEC_ID_UTVIDEO,      MKTAG('U', 'L', 'H', '2') },
+    { AV_CODEC_ID_UTVIDEO,      MKTAG('U', 'Q', 'Y', '2') },
     { AV_CODEC_ID_VBLE,         MKTAG('V', 'B', 'L', 'E') },
     { AV_CODEC_ID_ESCAPE130,    MKTAG('E', '1', '3', '0') },
     { AV_CODEC_ID_DXTORY,       MKTAG('x', 't', 'o', 'r') },
@@ -358,7 +360,9 @@ const AVCodecTag ff_codec_bmp_tags[] = {
     { AV_CODEC_ID_G2M,          MKTAG('G', '2', 'M', '2') },
     { AV_CODEC_ID_G2M,          MKTAG('G', '2', 'M', '3') },
     { AV_CODEC_ID_G2M,          MKTAG('G', '2', 'M', '4') },
+    { AV_CODEC_ID_G2M,          MKTAG('G', '2', 'M', '5') },
     { AV_CODEC_ID_FIC,          MKTAG('F', 'I', 'C', 'V') },
+    { AV_CODEC_ID_PRORES,       MKTAG('A', 'P', 'C', 'N') },
     { AV_CODEC_ID_NONE,         0 }
 };
 
@@ -410,6 +414,8 @@ const AVCodecTag ff_codec_wav_tags[] = {
     { AV_CODEC_ID_ADPCM_G722,      0x028F },
     { AV_CODEC_ID_IMC,             0x0401 },
     { AV_CODEC_ID_IAC,             0x0402 },
+    { AV_CODEC_ID_ON2AVC,          0x0500 },
+    { AV_CODEC_ID_ON2AVC,          0x0501 },
     { AV_CODEC_ID_GSM_MS,          0x1500 },
     { AV_CODEC_ID_TRUESPEECH,      0x1501 },
     /* ADTS AAC */
