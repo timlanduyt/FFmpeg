@@ -58,7 +58,7 @@ static int read_header(AVFormatContext *s)
     avio_skip(pb, 4);
     ico->nb_images = avio_rl16(pb);
 
-    ico->images = av_malloc(ico->nb_images * sizeof(IcoImage));
+    ico->images = av_malloc_array(ico->nb_images, sizeof(IcoImage));
     if (!ico->images)
         return AVERROR(ENOMEM);
 
@@ -124,7 +124,7 @@ static int read_packet(AVFormatContext *s, AVPacket *pkt)
     int ret;
 
     if (ico->current_image >= ico->nb_images)
-        return AVERROR(EIO);
+        return AVERROR_EOF;
 
     image = &ico->images[ico->current_image];
 

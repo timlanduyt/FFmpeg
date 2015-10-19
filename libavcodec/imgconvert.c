@@ -40,24 +40,6 @@
 #include "libavutil/pixdesc.h"
 #include "libavutil/imgutils.h"
 
-#define FF_COLOR_NA      -1
-#define FF_COLOR_RGB      0 /**< RGB color space */
-#define FF_COLOR_GRAY     1 /**< gray color space */
-#define FF_COLOR_YUV      2 /**< YUV color space. 16 <= Y <= 235, 16 <= U, V <= 240 */
-#define FF_COLOR_YUV_JPEG 3 /**< YUV color space. 0 <= Y <= 255, 0 <= U, V <= 255 */
-
-#if HAVE_MMX_EXTERNAL
-#define deinterlace_line_inplace ff_deinterlace_line_inplace_mmx
-#define deinterlace_line         ff_deinterlace_line_mmx
-#else
-#define deinterlace_line_inplace deinterlace_line_inplace_c
-#define deinterlace_line         deinterlace_line_c
-#endif
-
-#define pixdesc_has_alpha(pixdesc) \
-    ((pixdesc)->nb_components == 2 || (pixdesc)->nb_components == 4 || (pixdesc)->flags & AV_PIX_FMT_FLAG_PAL)
-
-
 void avcodec_get_chroma_sub_sample(enum AVPixelFormat pix_fmt, int *h_shift, int *v_shift)
 {
     const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(pix_fmt);
@@ -66,189 +48,17 @@ void avcodec_get_chroma_sub_sample(enum AVPixelFormat pix_fmt, int *h_shift, int
     *v_shift = desc->log2_chroma_h;
 }
 
-static int get_color_type(const AVPixFmtDescriptor *desc) {
-    if (desc->flags & AV_PIX_FMT_FLAG_PAL)
-        return FF_COLOR_RGB;
-
-    if(desc->nb_components == 1 || desc->nb_components == 2)
-        return FF_COLOR_GRAY;
-
-    if(desc->name && !strncmp(desc->name, "yuvj", 4))
-        return FF_COLOR_YUV_JPEG;
-
-    if(desc->flags & AV_PIX_FMT_FLAG_RGB)
-        return  FF_COLOR_RGB;
-
-    if(desc->nb_components == 0)
-        return FF_COLOR_NA;
-
-    return FF_COLOR_YUV;
-}
-
-static int get_pix_fmt_depth(int *min, int *max, enum AVPixelFormat pix_fmt)
-{
-    const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(pix_fmt);
-    int i;
-
-    if (!desc || !desc->nb_components) {
-        *min = *max = 0;
-        return AVERROR(EINVAL);
-    }
-
-    *min = INT_MAX, *max = -INT_MAX;
-    for (i = 0; i < desc->nb_components; i++) {
-        *min = FFMIN(desc->comp[i].depth_minus1+1, *min);
-        *max = FFMAX(desc->comp[i].depth_minus1+1, *max);
-    }
-    return 0;
-}
-
-static int get_pix_fmt_score(enum AVPixelFormat dst_pix_fmt,
-                              enum AVPixelFormat src_pix_fmt,
-                              unsigned *lossp, unsigned consider)
-{
-    const AVPixFmtDescriptor *src_desc = av_pix_fmt_desc_get(src_pix_fmt);
-    const AVPixFmtDescriptor *dst_desc = av_pix_fmt_desc_get(dst_pix_fmt);
-    int src_color, dst_color;
-    int src_min_depth, src_max_depth, dst_min_depth, dst_max_depth;
-    int ret, loss, i, nb_components;
-    int score = INT_MAX - 1;
-
-    if (dst_pix_fmt >= AV_PIX_FMT_NB || dst_pix_fmt <= AV_PIX_FMT_NONE)
-        return ~0;
-
-    /* compute loss */
-    *lossp = loss = 0;
-
-    if (dst_pix_fmt == src_pix_fmt)
-        return INT_MAX;
-
-    if ((ret = get_pix_fmt_depth(&src_min_depth, &src_max_depth, src_pix_fmt)) < 0)
-        return ret;
-    if ((ret = get_pix_fmt_depth(&dst_min_depth, &dst_max_depth, dst_pix_fmt)) < 0)
-        return ret;
-
-    src_color = get_color_type(src_desc);
-    dst_color = get_color_type(dst_desc);
-    if (dst_pix_fmt == AV_PIX_FMT_PAL8)
-        nb_components = FFMIN(src_desc->nb_components, 4);
-    else
-        nb_components = FFMIN(src_desc->nb_components, dst_desc->nb_components);
-
-    for (i = 0; i < nb_components; i++) {
-        int depth_minus1 = (dst_pix_fmt == AV_PIX_FMT_PAL8) ? 7/nb_components : dst_desc->comp[i].depth_minus1;
-        if (src_desc->comp[i].depth_minus1 > depth_minus1 && (consider & FF_LOSS_DEPTH)) {
-            loss |= FF_LOSS_DEPTH;
-            score -= 65536 >> depth_minus1;
-        }
-    }
-
-    if (consider & FF_LOSS_RESOLUTION) {
-        if (dst_desc->log2_chroma_w > src_desc->log2_chroma_w) {
-            loss |= FF_LOSS_RESOLUTION;
-            score -= 256 << dst_desc->log2_chroma_w;
-        }
-        if (dst_desc->log2_chroma_h > src_desc->log2_chroma_h) {
-            loss |= FF_LOSS_RESOLUTION;
-            score -= 256 << dst_desc->log2_chroma_h;
-        }
-        // don't favor 422 over 420 if downsampling is needed, because 420 has much better support on the decoder side
-        if (dst_desc->log2_chroma_w == 1 && src_desc->log2_chroma_w == 0 &&
-            dst_desc->log2_chroma_h == 1 && src_desc->log2_chroma_h == 0 ) {
-            score += 512;
-        }
-    }
-
-    if(consider & FF_LOSS_COLORSPACE)
-    switch(dst_color) {
-    case FF_COLOR_RGB:
-        if (src_color != FF_COLOR_RGB &&
-            src_color != FF_COLOR_GRAY)
-            loss |= FF_LOSS_COLORSPACE;
-        break;
-    case FF_COLOR_GRAY:
-        if (src_color != FF_COLOR_GRAY)
-            loss |= FF_LOSS_COLORSPACE;
-        break;
-    case FF_COLOR_YUV:
-        if (src_color != FF_COLOR_YUV)
-            loss |= FF_LOSS_COLORSPACE;
-        break;
-    case FF_COLOR_YUV_JPEG:
-        if (src_color != FF_COLOR_YUV_JPEG &&
-            src_color != FF_COLOR_YUV &&
-            src_color != FF_COLOR_GRAY)
-            loss |= FF_LOSS_COLORSPACE;
-        break;
-    default:
-        /* fail safe test */
-        if (src_color != dst_color)
-            loss |= FF_LOSS_COLORSPACE;
-        break;
-    }
-    if(loss & FF_LOSS_COLORSPACE)
-        score -= (nb_components * 65536) >> FFMIN(dst_desc->comp[0].depth_minus1, src_desc->comp[0].depth_minus1);
-
-    if (dst_color == FF_COLOR_GRAY &&
-        src_color != FF_COLOR_GRAY && (consider & FF_LOSS_CHROMA)) {
-        loss |= FF_LOSS_CHROMA;
-        score -= 2 * 65536;
-    }
-    if (!pixdesc_has_alpha(dst_desc) && (pixdesc_has_alpha(src_desc) && (consider & FF_LOSS_ALPHA))) {
-        loss |= FF_LOSS_ALPHA;
-        score -= 65536;
-    }
-    if (dst_pix_fmt == AV_PIX_FMT_PAL8 && (consider & FF_LOSS_COLORQUANT) &&
-        (src_pix_fmt != AV_PIX_FMT_PAL8 && (src_color != FF_COLOR_GRAY || (pixdesc_has_alpha(src_desc) && (consider & FF_LOSS_ALPHA))))) {
-        loss |= FF_LOSS_COLORQUANT;
-        score -= 65536;
-    }
-
-    *lossp = loss;
-    return score;
-}
-
 int avcodec_get_pix_fmt_loss(enum AVPixelFormat dst_pix_fmt,
                              enum AVPixelFormat src_pix_fmt,
                              int has_alpha)
 {
-    int loss;
-    int ret = get_pix_fmt_score(dst_pix_fmt, src_pix_fmt, &loss, has_alpha ? ~0 : ~FF_LOSS_ALPHA);
-    if (ret < 0)
-        return ret;
-    return loss;
+    return av_get_pix_fmt_loss(dst_pix_fmt, src_pix_fmt, has_alpha);
 }
 
 enum AVPixelFormat avcodec_find_best_pix_fmt_of_2(enum AVPixelFormat dst_pix_fmt1, enum AVPixelFormat dst_pix_fmt2,
                                             enum AVPixelFormat src_pix_fmt, int has_alpha, int *loss_ptr)
 {
-    enum AVPixelFormat dst_pix_fmt;
-    int loss1, loss2, loss_mask;
-    const AVPixFmtDescriptor *desc1 = av_pix_fmt_desc_get(dst_pix_fmt1);
-    const AVPixFmtDescriptor *desc2 = av_pix_fmt_desc_get(dst_pix_fmt2);
-    int score1, score2;
-
-    loss_mask= loss_ptr?~*loss_ptr:~0; /* use loss mask if provided */
-    if(!has_alpha)
-        loss_mask &= ~FF_LOSS_ALPHA;
-
-    dst_pix_fmt = AV_PIX_FMT_NONE;
-    score1 = get_pix_fmt_score(dst_pix_fmt1, src_pix_fmt, &loss1, loss_mask);
-    score2 = get_pix_fmt_score(dst_pix_fmt2, src_pix_fmt, &loss2, loss_mask);
-
-    if (score1 == score2) {
-        if(av_get_padded_bits_per_pixel(desc2) != av_get_padded_bits_per_pixel(desc1)) {
-            dst_pix_fmt = av_get_padded_bits_per_pixel(desc2) < av_get_padded_bits_per_pixel(desc1) ? dst_pix_fmt2 : dst_pix_fmt1;
-        } else {
-            dst_pix_fmt = desc2->nb_components < desc1->nb_components ? dst_pix_fmt2 : dst_pix_fmt1;
-        }
-    } else {
-        dst_pix_fmt = score1 < score2 ? dst_pix_fmt2 : dst_pix_fmt1;
-    }
-
-    if (loss_ptr)
-        *loss_ptr = avcodec_get_pix_fmt_loss(dst_pix_fmt, src_pix_fmt, has_alpha);
-    return dst_pix_fmt;
+    return av_find_best_pix_fmt_of_2(dst_pix_fmt1, dst_pix_fmt2, src_pix_fmt, has_alpha, loss_ptr);
 }
 
 #if AV_HAVE_INCOMPATIBLE_LIBAV_ABI
@@ -391,12 +201,14 @@ int av_picture_crop(AVPicture *dst, const AVPicture *src,
     const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(pix_fmt);
     int y_shift;
     int x_shift;
+    int max_step[4];
 
     if (pix_fmt < 0 || pix_fmt >= AV_PIX_FMT_NB)
         return -1;
 
     y_shift = desc->log2_chroma_h;
     x_shift = desc->log2_chroma_w;
+    av_image_fill_max_pixsteps(max_step, NULL, desc);
 
     if (is_yuv_planar(desc)) {
     dst->data[0] = src->data[0] + (top_band * src->linesize[0]) + left_band;
@@ -405,9 +217,7 @@ int av_picture_crop(AVPicture *dst, const AVPicture *src,
     } else{
         if(top_band % (1<<y_shift) || left_band % (1<<x_shift))
             return -1;
-        if(left_band) //FIXME add support for this too
-            return -1;
-        dst->data[0] = src->data[0] + (top_band * src->linesize[0]) + left_band;
+        dst->data[0] = src->data[0] + (top_band * src->linesize[0]) + (left_band * max_step[0]);
     }
 
     dst->linesize[0] = src->linesize[0];
@@ -426,9 +236,41 @@ int av_picture_pad(AVPicture *dst, const AVPicture *src, int height, int width,
     int x_shift;
     int yheight;
     int i, y;
+    int max_step[4];
 
-    if (pix_fmt < 0 || pix_fmt >= AV_PIX_FMT_NB ||
-        !is_yuv_planar(desc)) return -1;
+    if (pix_fmt < 0 || pix_fmt >= AV_PIX_FMT_NB)
+        return -1;
+
+    if (!is_yuv_planar(desc)) {
+        if (src)
+            return -1; //TODO: Not yet implemented
+
+        av_image_fill_max_pixsteps(max_step, NULL, desc);
+
+        if (padtop || padleft) {
+            memset(dst->data[0], color[0],
+                    dst->linesize[0] * padtop + (padleft * max_step[0]));
+        }
+
+        if (padleft || padright) {
+            optr = dst->data[0] + dst->linesize[0] * padtop +
+                    (dst->linesize[0] - (padright * max_step[0]));
+            yheight = height - 1 - (padtop + padbottom);
+            for (y = 0; y < yheight; y++) {
+                memset(optr, color[0], (padleft + padright) * max_step[0]);
+                optr += dst->linesize[0];
+            }
+        }
+
+        if (padbottom || padright) {
+            optr = dst->data[0] + dst->linesize[0] * (height - padbottom) -
+                    (padright * max_step[0]);
+            memset(optr, color[0], dst->linesize[0] * padbottom +
+                    (padright * max_step[0]));
+        }
+
+        return 0;
+    }
 
     for (i = 0; i < 3; i++) {
         x_shift = i ? desc->log2_chroma_w : 0;
@@ -474,171 +316,9 @@ int av_picture_pad(AVPicture *dst, const AVPicture *src, int height, int width,
                 (padbottom >> y_shift) + (padright >> x_shift));
         }
     }
+
     return 0;
 }
-
-#if FF_API_DEINTERLACE
-
-#if !HAVE_MMX_EXTERNAL
-/* filter parameters: [-1 4 2 4 -1] // 8 */
-static void deinterlace_line_c(uint8_t *dst,
-                             const uint8_t *lum_m4, const uint8_t *lum_m3,
-                             const uint8_t *lum_m2, const uint8_t *lum_m1,
-                             const uint8_t *lum,
-                             int size)
-{
-    const uint8_t *cm = ff_crop_tab + MAX_NEG_CROP;
-    int sum;
-
-    for(;size > 0;size--) {
-        sum = -lum_m4[0];
-        sum += lum_m3[0] << 2;
-        sum += lum_m2[0] << 1;
-        sum += lum_m1[0] << 2;
-        sum += -lum[0];
-        dst[0] = cm[(sum + 4) >> 3];
-        lum_m4++;
-        lum_m3++;
-        lum_m2++;
-        lum_m1++;
-        lum++;
-        dst++;
-    }
-}
-
-static void deinterlace_line_inplace_c(uint8_t *lum_m4, uint8_t *lum_m3,
-                                       uint8_t *lum_m2, uint8_t *lum_m1,
-                                       uint8_t *lum, int size)
-{
-    const uint8_t *cm = ff_crop_tab + MAX_NEG_CROP;
-    int sum;
-
-    for(;size > 0;size--) {
-        sum = -lum_m4[0];
-        sum += lum_m3[0] << 2;
-        sum += lum_m2[0] << 1;
-        lum_m4[0]=lum_m2[0];
-        sum += lum_m1[0] << 2;
-        sum += -lum[0];
-        lum_m2[0] = cm[(sum + 4) >> 3];
-        lum_m4++;
-        lum_m3++;
-        lum_m2++;
-        lum_m1++;
-        lum++;
-    }
-}
-#endif /* !HAVE_MMX_EXTERNAL */
-
-/* deinterlacing : 2 temporal taps, 3 spatial taps linear filter. The
-   top field is copied as is, but the bottom field is deinterlaced
-   against the top field. */
-static void deinterlace_bottom_field(uint8_t *dst, int dst_wrap,
-                                    const uint8_t *src1, int src_wrap,
-                                    int width, int height)
-{
-    const uint8_t *src_m2, *src_m1, *src_0, *src_p1, *src_p2;
-    int y;
-
-    src_m2 = src1;
-    src_m1 = src1;
-    src_0=&src_m1[src_wrap];
-    src_p1=&src_0[src_wrap];
-    src_p2=&src_p1[src_wrap];
-    for(y=0;y<(height-2);y+=2) {
-        memcpy(dst,src_m1,width);
-        dst += dst_wrap;
-        deinterlace_line(dst,src_m2,src_m1,src_0,src_p1,src_p2,width);
-        src_m2 = src_0;
-        src_m1 = src_p1;
-        src_0 = src_p2;
-        src_p1 += 2*src_wrap;
-        src_p2 += 2*src_wrap;
-        dst += dst_wrap;
-    }
-    memcpy(dst,src_m1,width);
-    dst += dst_wrap;
-    /* do last line */
-    deinterlace_line(dst,src_m2,src_m1,src_0,src_0,src_0,width);
-}
-
-static void deinterlace_bottom_field_inplace(uint8_t *src1, int src_wrap,
-                                             int width, int height)
-{
-    uint8_t *src_m1, *src_0, *src_p1, *src_p2;
-    int y;
-    uint8_t *buf;
-    buf = av_malloc(width);
-
-    src_m1 = src1;
-    memcpy(buf,src_m1,width);
-    src_0=&src_m1[src_wrap];
-    src_p1=&src_0[src_wrap];
-    src_p2=&src_p1[src_wrap];
-    for(y=0;y<(height-2);y+=2) {
-        deinterlace_line_inplace(buf,src_m1,src_0,src_p1,src_p2,width);
-        src_m1 = src_p1;
-        src_0 = src_p2;
-        src_p1 += 2*src_wrap;
-        src_p2 += 2*src_wrap;
-    }
-    /* do last line */
-    deinterlace_line_inplace(buf,src_m1,src_0,src_0,src_0,width);
-    av_free(buf);
-}
-
-int avpicture_deinterlace(AVPicture *dst, const AVPicture *src,
-                          enum AVPixelFormat pix_fmt, int width, int height)
-{
-    int i;
-
-    if (pix_fmt != AV_PIX_FMT_YUV420P &&
-        pix_fmt != AV_PIX_FMT_YUVJ420P &&
-        pix_fmt != AV_PIX_FMT_YUV422P &&
-        pix_fmt != AV_PIX_FMT_YUVJ422P &&
-        pix_fmt != AV_PIX_FMT_YUV444P &&
-        pix_fmt != AV_PIX_FMT_YUV411P &&
-        pix_fmt != AV_PIX_FMT_GRAY8)
-        return -1;
-    if ((width & 3) != 0 || (height & 3) != 0)
-        return -1;
-
-    for(i=0;i<3;i++) {
-        if (i == 1) {
-            switch(pix_fmt) {
-            case AV_PIX_FMT_YUVJ420P:
-            case AV_PIX_FMT_YUV420P:
-                width >>= 1;
-                height >>= 1;
-                break;
-            case AV_PIX_FMT_YUV422P:
-            case AV_PIX_FMT_YUVJ422P:
-                width >>= 1;
-                break;
-            case AV_PIX_FMT_YUV411P:
-                width >>= 2;
-                break;
-            default:
-                break;
-            }
-            if (pix_fmt == AV_PIX_FMT_GRAY8) {
-                break;
-            }
-        }
-        if (src == dst) {
-            deinterlace_bottom_field_inplace(dst->data[i], dst->linesize[i],
-                                 width, height);
-        } else {
-            deinterlace_bottom_field(dst->data[i],dst->linesize[i],
-                                        src->data[i], src->linesize[i],
-                                        width, height);
-        }
-    }
-    emms_c();
-    return 0;
-}
-
-#endif /* FF_API_DEINTERLACE */
 
 #ifdef TEST
 
@@ -657,7 +337,7 @@ int main(void){
             av_log(NULL, AV_LOG_INFO, "%3d unused pixel format values\n", skip);
             skip = 0;
         }
-        av_log(NULL, AV_LOG_INFO, "pix fmt %s yuv_plan:%d avg_bpp:%d colortype:%d\n", desc->name, is_yuv_planar(desc), av_get_padded_bits_per_pixel(desc), get_color_type(desc));
+        av_log(NULL, AV_LOG_INFO, "pix fmt %s yuv_plan:%d avg_bpp:%d\n", desc->name, is_yuv_planar(desc), av_get_padded_bits_per_pixel(desc));
         if ((!(desc->flags & AV_PIX_FMT_FLAG_ALPHA)) != (desc->nb_components != 2 && desc->nb_components != 4)) {
             av_log(NULL, AV_LOG_ERROR, "Alpha flag mismatch\n");
             err = 1;

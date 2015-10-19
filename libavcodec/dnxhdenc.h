@@ -41,6 +41,7 @@ typedef struct RCEntry {
 
 typedef struct DNXHDEncContext {
     AVClass *class;
+    BlockDSPContext bdsp;
     MpegEncContext m; ///< Used for quantization dsp functions
 
     int cid;
@@ -62,6 +63,7 @@ typedef struct DNXHDEncContext {
 
     int nitris_compat;
     unsigned min_padding;
+    int intra_quant_bias;
 
     DECLARE_ALIGNED(16, int16_t, blocks)[8][64];
 

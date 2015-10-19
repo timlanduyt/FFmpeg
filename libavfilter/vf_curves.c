@@ -60,7 +60,7 @@ enum preset {
 
 typedef struct {
     const AVClass *class;
-    enum preset preset;
+    int preset;
     char *comp_points_str[NB_COMP + 1];
     char *comp_points_str_all;
     uint8_t graph[NB_COMP + 1][256];
@@ -331,8 +331,10 @@ static int parse_psfile(AVFilterContext *ctx, const char *fname)
         return ret;
 
 #define READ16(dst) do {                \
-    if (size < 2)                       \
-        return AVERROR_INVALIDDATA;     \
+    if (size < 2) {                     \
+        ret = AVERROR_INVALIDDATA;      \
+        goto end;                       \
+    }                                   \
     dst = AV_RB16(buf);                 \
     buf  += 2;                          \
     size -= 2;                          \
@@ -462,8 +464,10 @@ static int query_formats(AVFilterContext *ctx)
         AV_PIX_FMT_RGB0,   AV_PIX_FMT_BGR0,
         AV_PIX_FMT_NONE
     };
-    ff_set_common_formats(ctx, ff_make_format_list(pix_fmts));
-    return 0;
+    AVFilterFormats *fmts_list = ff_make_format_list(pix_fmts);
+    if (!fmts_list)
+        return AVERROR(ENOMEM);
+    return ff_set_common_formats(ctx, fmts_list);
 }
 
 static int config_input(AVFilterLink *inlink)

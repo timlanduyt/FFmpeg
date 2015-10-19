@@ -28,13 +28,14 @@
  */
 
 #include "avcodec.h"
-#include "dsputil.h"
+#include "idctdsp.h"
 #include "mpegvideo.h"
 #include "msmpeg4.h"
 #include "libavutil/x86/asm.h"
 #include "h263.h"
 #include "mpeg4video.h"
 #include "msmpeg4data.h"
+#include "mpegvideodata.h"
 #include "vc1data.h"
 #include "libavutil/imgutils.h"
 
@@ -138,10 +139,10 @@ av_cold void ff_msmpeg4_common_init(MpegEncContext *s)
 
 
     if(s->msmpeg4_version>=4){
-        ff_init_scantable(s->dsp.idct_permutation, &s->intra_scantable  , ff_wmv1_scantable[1]);
-        ff_init_scantable(s->dsp.idct_permutation, &s->intra_h_scantable, ff_wmv1_scantable[2]);
-        ff_init_scantable(s->dsp.idct_permutation, &s->intra_v_scantable, ff_wmv1_scantable[3]);
-        ff_init_scantable(s->dsp.idct_permutation, &s->inter_scantable  , ff_wmv1_scantable[0]);
+        ff_init_scantable(s->idsp.idct_permutation, &s->intra_scantable,   ff_wmv1_scantable[1]);
+        ff_init_scantable(s->idsp.idct_permutation, &s->intra_h_scantable, ff_wmv1_scantable[2]);
+        ff_init_scantable(s->idsp.idct_permutation, &s->intra_v_scantable, ff_wmv1_scantable[3]);
+        ff_init_scantable(s->idsp.idct_permutation, &s->inter_scantable,   ff_wmv1_scantable[0]);
     }
     //Note the default tables are set in common_init in mpegvideo.c
 

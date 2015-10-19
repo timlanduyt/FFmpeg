@@ -107,23 +107,26 @@ static int query_formats(AVFilterContext *ctx)
         AV_SAMPLE_FMT_DBLP,
         AV_SAMPLE_FMT_NONE
     };
+    int ret;
 
-    layouts = ff_all_channel_layouts();
+    layouts = ff_all_channel_counts();
     if (!layouts)
         return AVERROR(ENOMEM);
-    ff_set_common_channel_layouts(ctx, layouts);
+    ret = ff_set_common_channel_layouts(ctx, layouts);
+    if (ret < 0)
+        return ret;
 
     formats = ff_make_format_list(sample_fmts);
     if (!formats)
         return AVERROR(ENOMEM);
-    ff_set_common_formats(ctx, formats);
+    ret = ff_set_common_formats(ctx, formats);
+    if (ret < 0)
+        return ret;
 
     formats = ff_all_samplerates();
     if (!formats)
         return AVERROR(ENOMEM);
-    ff_set_common_samplerates(ctx, formats);
-
-    return 0;
+    return ff_set_common_samplerates(ctx, formats);
 }
 
 static void count_items(char *item_str, int *nb_items)
@@ -278,7 +281,13 @@ static int compand_delay(AVFilterContext *ctx, AVFrame *frame)
     s->delay_index = dindex;
 
     av_frame_free(&frame);
-    return out_frame ? ff_filter_frame(ctx->outputs[0], out_frame) : 0;
+
+    if (out_frame) {
+        err = ff_filter_frame(ctx->outputs[0], out_frame);
+        return err;
+    }
+
+    return 0;
 }
 
 static int compand_drain(AVFilterLink *outlink)
@@ -297,6 +306,7 @@ static int compand_drain(AVFilterLink *outlink)
     s->pts += av_rescale_q(frame->nb_samples,
             (AVRational){ 1, outlink->sample_rate }, outlink->time_base);
 
+    av_assert0(channels > 0);
     for (chan = 0; chan < channels; chan++) {
         AVFrame *delay_frame = s->delay_frame;
         double *dbuf = (double *)delay_frame->extended_data[chan];
@@ -386,6 +396,11 @@ static int config_output(AVFilterLink *outlink)
                 nb_attacks, nb_decays);
         uninit(ctx);
         return AVERROR(EINVAL);
+    }
+
+    for (i = nb_decays; i < channels; i++) {
+        s->channels[i].attack = s->channels[nb_decays - 1].attack;
+        s->channels[i].decay = s->channels[nb_decays - 1].decay;
     }
 
 #define S(x) s->segments[2 * ((x) + 1)]
@@ -516,7 +531,6 @@ static int config_output(AVFilterLink *outlink)
     if (err)
         return err;
 
-    outlink->flags |= FF_LINK_FLAG_REQUEST_LOOP;
     s->compand = compand_delay;
     return 0;
 }
@@ -533,7 +547,7 @@ static int request_frame(AVFilterLink *outlink)
 {
     AVFilterContext *ctx = outlink->src;
     CompandContext *s    = ctx->priv;
-    int ret;
+    int ret = 0;
 
     ret = ff_request_frame(ctx->inputs[0]);
 

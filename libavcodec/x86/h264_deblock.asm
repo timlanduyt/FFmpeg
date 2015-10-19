@@ -4,7 +4,7 @@
 ;* Copyright (C) 2005-2011 x264 project
 ;*
 ;* Authors: Loren Merritt <lorenm@u.washington.edu>
-;*          Jason Garrett-Glaser <darkshikari@gmail.com>
+;*          Fiona Glaser <fiona@x264.com>
 ;*          Oskar Arvidsson <oskar@irock.se>
 ;*
 ;* This file is part of FFmpeg.
@@ -446,13 +446,13 @@ cglobal deblock_%1_luma_8, 5,5,8,2*%2
 ;                        int8_t *tc0)
 ;-----------------------------------------------------------------------------
 INIT_MMX cpuname
-cglobal deblock_h_luma_8, 0,5,8,0x60+HAVE_ALIGNED_STACK*12
+cglobal deblock_h_luma_8, 0,5,8,0x60+12
     mov    r0, r0mp
     mov    r3, r1m
     lea    r4, [r3*3]
     sub    r0, 4
     lea    r1, [r0+r4]
-%define pix_tmp esp+12*HAVE_ALIGNED_STACK
+%define pix_tmp esp+12
 
     ; transpose 6x16 -> tmp space
     TRANSPOSE6x8_MEM  PASS8ROWS(r0, r1, r3, r4), pix_tmp
@@ -827,10 +827,10 @@ cglobal deblock_v_chroma_8, 5,6
 ;                          int8_t *tc0)
 ;-----------------------------------------------------------------------------
 cglobal deblock_h_chroma_8, 5,7
-%if UNIX64
-    %define buf0 [rsp-24]
-    %define buf1 [rsp-16]
-%elif WIN64
+%if ARCH_X86_64
+    ; This could use the red zone on 64 bit unix to avoid the stack pointer
+    ; readjustment, but valgrind assumes the red zone is clobbered on
+    ; function calls and returns.
     sub   rsp, 16
     %define buf0 [rsp]
     %define buf1 [rsp+8]
@@ -850,7 +850,7 @@ cglobal deblock_h_chroma_8, 5,7
     movq  m0, buf0
     movq  m3, buf1
     TRANSPOSE8x4B_STORE PASS8ROWS(t5, r0, r1, t6)
-%if WIN64
+%if ARCH_X86_64
     add   rsp, 16
 %endif
     RET

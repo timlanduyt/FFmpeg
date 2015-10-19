@@ -21,13 +21,6 @@
  */
 
 #include "config.h"
-#include "libavformat/avformat.h"
-#include "libavformat/internal.h"
-#include "libavutil/log.h"
-#include "libavutil/mathematics.h"
-#include "libavutil/opt.h"
-#include "libavutil/parseutils.h"
-#include "libavutil/pixdesc.h"
 
 #if HAVE_LIBDC1394_2
 #include <dc1394/dc1394.h>
@@ -47,6 +40,16 @@
 #define DC1394_FRAMERATE_120   FRAMERATE_120
 #define DC1394_FRAMERATE_240   FRAMERATE_240
 #endif
+
+#include "libavutil/internal.h"
+#include "libavutil/log.h"
+#include "libavutil/mathematics.h"
+#include "libavutil/opt.h"
+#include "libavutil/parseutils.h"
+#include "libavutil/pixdesc.h"
+
+#include "libavformat/avformat.h"
+#include "libavformat/internal.h"
 
 typedef struct dc1394_data {
     AVClass *class;
@@ -68,19 +71,20 @@ typedef struct dc1394_data {
     AVPacket packet;
 } dc1394_data;
 
-struct dc1394_frame_format {
+static const struct dc1394_frame_format {
     int width;
     int height;
     enum AVPixelFormat pix_fmt;
     int frame_size_id;
 } dc1394_frame_formats[] = {
     { 320, 240, AV_PIX_FMT_UYVY422,   DC1394_VIDEO_MODE_320x240_YUV422 },
+    { 640, 480, AV_PIX_FMT_GRAY8,     DC1394_VIDEO_MODE_640x480_MONO8 },
     { 640, 480, AV_PIX_FMT_UYYVYY411, DC1394_VIDEO_MODE_640x480_YUV411 },
     { 640, 480, AV_PIX_FMT_UYVY422,   DC1394_VIDEO_MODE_640x480_YUV422 },
     { 0, 0, 0, 0 } /* gotta be the last one */
 };
 
-struct dc1394_frame_rate {
+static const struct dc1394_frame_rate {
     int frame_rate;
     int frame_rate_id;
 } dc1394_frame_rates[] = {
@@ -117,12 +121,12 @@ static const AVClass libdc1394_class = {
 
 
 static inline int dc1394_read_common(AVFormatContext *c,
-                                     struct dc1394_frame_format **select_fmt, struct dc1394_frame_rate **select_fps)
+                                     const struct dc1394_frame_format **select_fmt, const struct dc1394_frame_rate **select_fps)
 {
     dc1394_data* dc1394 = c->priv_data;
     AVStream* vst;
-    struct dc1394_frame_format *fmt;
-    struct dc1394_frame_rate *fps;
+    const struct dc1394_frame_format *fmt;
+    const struct dc1394_frame_rate *fps;
     enum AVPixelFormat pix_fmt;
     int width, height;
     AVRational framerate;
@@ -289,8 +293,8 @@ static int dc1394_v2_read_header(AVFormatContext *c)
     dc1394_data* dc1394 = c->priv_data;
     dc1394camera_list_t *list;
     int res, i;
-    struct dc1394_frame_format *fmt = NULL;
-    struct dc1394_frame_rate *fps = NULL;
+    const struct dc1394_frame_format *fmt = NULL;
+    const struct dc1394_frame_rate *fps = NULL;
 
     if (dc1394_read_common(c, &fmt, &fps) != 0)
        return -1;

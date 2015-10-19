@@ -1337,7 +1337,7 @@ AVCodec ff_g723_1_decoder = {
     .priv_data_size = sizeof(G723_1_Context),
     .init           = g723_1_decode_init,
     .decode         = g723_1_decode_frame,
-    .capabilities   = CODEC_CAP_SUBFRAMES | CODEC_CAP_DR1,
+    .capabilities   = AV_CODEC_CAP_SUBFRAMES | AV_CODEC_CAP_DR1,
     .priv_class     = &g723_1dec_class,
 };
 
@@ -2142,7 +2142,7 @@ static void get_fcb_param(FCBParam *optim, int16_t *impulse_resp,
             temp_corr[param.pulse_pos[0]] = 1;
 
             for (k = 1; k < pulse_cnt; k++) {
-                max = -1 << 30;
+                max = INT_MIN;
                 for (l = i; l < SUBFRAME_LEN; l += GRID_SIZE) {
                     if (temp_corr[l])
                         continue;
@@ -2346,10 +2346,14 @@ static int g723_1_encode_frame(AVCodecContext *avctx, AVPacket *avpkt,
     int16_t weighted_lpc[LPC_ORDER * SUBFRAMES << 1];
     int16_t vector[FRAME_LEN + PITCH_MAX];
     int offset, ret;
-    int16_t *in = (const int16_t *)frame->data[0];
+    int16_t *in_orig = av_memdup(frame->data[0], frame->nb_samples * sizeof(int16_t));
+    int16_t *in = in_orig;
 
     HFParam hf[4];
     int i, j;
+
+    if (!in)
+        return AVERROR(ENOMEM);
 
     highpass_filter(in, &p->hpf_fir_mem, &p->hpf_iir_mem);
 
@@ -2456,7 +2460,9 @@ static int g723_1_encode_frame(AVCodecContext *avctx, AVPacket *avpkt,
         offset += LPC_ORDER;
     }
 
-    if ((ret = ff_alloc_packet2(avctx, avpkt, 24)) < 0)
+    av_freep(&in_orig); in = NULL;
+
+    if ((ret = ff_alloc_packet2(avctx, avpkt, 24, 0)) < 0)
         return ret;
 
     *got_packet_ptr = 1;

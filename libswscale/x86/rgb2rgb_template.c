@@ -1090,7 +1090,7 @@ static inline void RENAME(shuffle_bytes_2103)(const uint8_t *src, uint8_t *dst, 
         : "r" (s), "r" (d), "m" (mask32b), "m" (mask32r), "m" (mmx_one)
         : "memory");
     for (; idx<15; idx+=4) {
-        register int v = *(const uint32_t *)&s[idx], g = v & 0xff00ff00;
+        register unsigned v  = *(const uint32_t *)&s[idx], g = v & 0xff00ff00;
         v &= 0xff00ff;
         *(uint32_t *)&d[idx] = (v>>16) + g + (v<<16);
     }
@@ -1634,6 +1634,16 @@ static inline void RENAME(rgb24toyv12)(const uint8_t *src, uint8_t *ydst, uint8_
 #define BGR2V_IDX "16*4+16*34"
     int y;
     const x86_reg chromWidth= width>>1;
+
+    if (height > 2) {
+        ff_rgb24toyv12_c(src, ydst, udst, vdst, width, 2, lumStride, chromStride, srcStride, rgb2yuv);
+        src  += 2*srcStride;
+        ydst += 2*lumStride;
+        udst += chromStride;
+        vdst += chromStride;
+        height -= 2;
+    }
+
     for (y=0; y<height-2; y+=2) {
         int i;
         for (i=0; i<2; i++) {
@@ -1877,6 +1887,7 @@ static void RENAME(interleaveBytes)(const uint8_t *src1, const uint8_t *src2, ui
     for (h=0; h < height; h++) {
         int w;
 
+        if (width >= 16)
 #if COMPILE_TEMPLATE_SSE2
         __asm__(
             "xor              %%"REG_a", %%"REG_a"  \n\t"
@@ -1894,7 +1905,7 @@ static void RENAME(interleaveBytes)(const uint8_t *src1, const uint8_t *src2, ui
             "cmp                     %3, %%"REG_a"  \n\t"
             " jb                     1b             \n\t"
             ::"r"(dest), "r"(src1), "r"(src2), "r" ((x86_reg)width-15)
-            : "memory", "%"REG_a""
+            : "memory", XMM_CLOBBERS("xmm0", "xmm1", "xmm2",) "%"REG_a
         );
 #else
         __asm__(
@@ -1932,7 +1943,9 @@ static void RENAME(interleaveBytes)(const uint8_t *src1, const uint8_t *src2, ui
         src2 += src2Stride;
     }
     __asm__(
+#if !COMPILE_TEMPLATE_SSE2
             EMMS"       \n\t"
+#endif
             SFENCE"     \n\t"
             ::: "memory"
             );
@@ -1960,7 +1973,9 @@ static void RENAME(deinterleaveBytes)(const uint8_t *src, uint8_t *dst1, uint8_t
         dst2 += dst2Stride;
     }
     __asm__(
+#if !COMPILE_TEMPLATE_SSE2
             EMMS"       \n\t"
+#endif
             SFENCE"     \n\t"
             ::: "memory"
             );
@@ -2179,6 +2194,44 @@ static void RENAME(extract_even)(const uint8_t *src, uint8_t *dst, x86_reg count
             : "r"(src), "r"(dst)
         );
         count -= 15;
+    }
+    while(count<0) {
+        dst[count]= src[2*count];
+        count++;
+    }
+}
+
+static void RENAME(extract_odd)(const uint8_t *src, uint8_t *dst, x86_reg count)
+{
+    src ++;
+    dst +=   count;
+    src += 2*count;
+    count= - count;
+
+    if(count < -16) {
+        count += 16;
+        __asm__ volatile(
+            "pcmpeqw       %%mm7, %%mm7        \n\t"
+            "psrlw            $8, %%mm7        \n\t"
+            "1:                                \n\t"
+            "movq -32(%1, %0, 2), %%mm0        \n\t"
+            "movq -24(%1, %0, 2), %%mm1        \n\t"
+            "movq -16(%1, %0, 2), %%mm2        \n\t"
+            "movq  -8(%1, %0, 2), %%mm3        \n\t"
+            "pand          %%mm7, %%mm0        \n\t"
+            "pand          %%mm7, %%mm1        \n\t"
+            "pand          %%mm7, %%mm2        \n\t"
+            "pand          %%mm7, %%mm3        \n\t"
+            "packuswb      %%mm1, %%mm0        \n\t"
+            "packuswb      %%mm3, %%mm2        \n\t"
+            MOVNTQ"        %%mm0,-16(%2, %0)   \n\t"
+            MOVNTQ"        %%mm2,- 8(%2, %0)   \n\t"
+            "add             $16, %0           \n\t"
+            " js 1b                            \n\t"
+            : "+r"(count)
+            : "r"(src), "r"(dst)
+        );
+        count -= 16;
     }
     while(count<0) {
         dst[count]= src[2*count];
@@ -2449,7 +2502,7 @@ static void RENAME(uyvytoyuv420)(uint8_t *ydst, uint8_t *udst, uint8_t *vdst, co
     const int chromWidth = FF_CEIL_RSHIFT(width, 1);
 
     for (y=0; y<height; y++) {
-        RENAME(extract_even)(src+1, ydst, width);
+        RENAME(extract_odd)(src, ydst, width);
         if(y&1) {
             RENAME(extract_even2avg)(src-srcStride, src, udst, vdst, chromWidth);
             udst+= chromStride;
@@ -2475,7 +2528,7 @@ static void RENAME(uyvytoyuv422)(uint8_t *ydst, uint8_t *udst, uint8_t *vdst, co
     const int chromWidth = FF_CEIL_RSHIFT(width, 1);
 
     for (y=0; y<height; y++) {
-        RENAME(extract_even)(src+1, ydst, width);
+        RENAME(extract_odd)(src, ydst, width);
         RENAME(extract_even2)(src, udst, vdst, chromWidth);
 
         src += srcStride;

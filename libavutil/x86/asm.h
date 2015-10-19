@@ -25,6 +25,7 @@
 #include "config.h"
 
 typedef struct xmm_reg { uint64_t a, b; } xmm_reg;
+typedef struct ymm_reg { uint64_t a, b, c, d; } ymm_reg;
 
 #if ARCH_X86_64
 #    define OPSIZE "q"
@@ -37,7 +38,8 @@ typedef struct xmm_reg { uint64_t a, b; } xmm_reg;
 #    define PTR_SIZE "8"
 typedef int64_t x86_reg;
 
-#    define REG_SP "rsp"
+/* REG_SP is defined in Solaris sys headers, so use REG_sp */
+#    define REG_sp "rsp"
 #    define REG_BP "rbp"
 #    define REGBP   rbp
 #    define REGa    rax
@@ -58,7 +60,7 @@ typedef int64_t x86_reg;
 #    define PTR_SIZE "4"
 typedef int32_t x86_reg;
 
-#    define REG_SP "esp"
+#    define REG_sp "esp"
 #    define REG_BP "ebp"
 #    define REGBP   ebp
 #    define REGa    eax
@@ -111,6 +113,8 @@ typedef int x86_reg;
 #   define MANGLE(a) EXTERN_PREFIX LOCAL_MANGLE(a)
 #   define NAMED_CONSTRAINTS_ADD(...)
 #   define NAMED_CONSTRAINTS(...)
+#   define NAMED_CONSTRAINTS_ARRAY_ADD(...)
+#   define NAMED_CONSTRAINTS_ARRAY(...)
 #else
     /* When direct symbol references are used in code passed to a compiler that does not support them
      *  then these references need to be converted to named asm constraints instead.
@@ -141,6 +145,10 @@ typedef int x86_reg;
 #   define NAMED_CONSTRAINTS_ADD(...) , FOR_EACH_VA(NAME_CONSTRAINT,__VA_ARGS__)
     // Same but without comma for when there are no previously defined constraints
 #   define NAMED_CONSTRAINTS(...) FOR_EACH_VA(NAME_CONSTRAINT,__VA_ARGS__)
+    // Same as above NAMED_CONSTRAINTS except used for passing arrays/pointers instead of normal variables
+#   define NAME_CONSTRAINT_ARRAY(x) [x] "m"(*x)
+#   define NAMED_CONSTRAINTS_ARRAY_ADD(...) , FOR_EACH_VA(NAME_CONSTRAINT_ARRAY,__VA_ARGS__)
+#   define NAMED_CONSTRAINTS_ARRAY(...) FOR_EACH_VA(NAME_CONSTRAINT_ARRAY,__VA_ARGS__)
 #endif
 
 #endif /* AVUTIL_X86_ASM_H */

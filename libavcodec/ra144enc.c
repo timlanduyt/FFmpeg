@@ -55,13 +55,13 @@ static av_cold int ra144_encode_init(AVCodecContext * avctx)
         return -1;
     }
     avctx->frame_size = NBLOCKS * BLOCKSIZE;
-    avctx->delay      = avctx->frame_size;
+    avctx->initial_padding = avctx->frame_size;
     avctx->bit_rate = 8000;
     ractx = avctx->priv_data;
     ractx->lpc_coef[0] = ractx->lpc_tables[0];
     ractx->lpc_coef[1] = ractx->lpc_tables[1];
     ractx->avctx = avctx;
-    ff_dsputil_init(&ractx->dsp, avctx);
+    ff_audiodsp_init(&ractx->adsp);
     ret = ff_lpc_init(&ractx->lpc_ctx, avctx->frame_size, LPC_ORDER,
                       FF_LPC_TYPE_LEVINSON);
     if (ret < 0)
@@ -374,7 +374,7 @@ static void ra144_encode_subblock(RA144Context *ractx,
         memcpy(cba, work + LPC_ORDER, sizeof(cba));
 
         ff_copy_and_dup(ractx->buffer_a, ractx->adapt_cb, cba_idx + BLOCKSIZE / 2 - 1);
-        m[0] = (ff_irms(&ractx->dsp, ractx->buffer_a) * rms) >> 12;
+        m[0] = (ff_irms(&ractx->adsp, ractx->buffer_a) * rms) >> 12;
     }
     fixed_cb_search(work + LPC_ORDER, coefs, data, cba_idx, &cb1_idx, &cb2_idx);
     for (i = 0; i < BLOCKSIZE; i++) {
@@ -447,7 +447,7 @@ static int ra144_encode_frame(AVCodecContext *avctx, AVPacket *avpkt,
     if (ractx->last_frame)
         return 0;
 
-    if ((ret = ff_alloc_packet2(avctx, avpkt, FRAME_SIZE)) < 0)
+    if ((ret = ff_alloc_packet2(avctx, avpkt, FRAME_SIZE, 0)) < 0)
         return ret;
 
     /**
@@ -551,7 +551,7 @@ AVCodec ff_ra_144_encoder = {
     .init           = ra144_encode_init,
     .encode2        = ra144_encode_frame,
     .close          = ra144_encode_close,
-    .capabilities   = CODEC_CAP_DELAY | CODEC_CAP_SMALL_LAST_FRAME,
+    .capabilities   = AV_CODEC_CAP_DELAY | AV_CODEC_CAP_SMALL_LAST_FRAME,
     .sample_fmts    = (const enum AVSampleFormat[]){ AV_SAMPLE_FMT_S16,
                                                      AV_SAMPLE_FMT_NONE },
     .supported_samplerates = (const int[]){ 8000, 0 },

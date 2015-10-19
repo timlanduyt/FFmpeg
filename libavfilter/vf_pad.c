@@ -73,11 +73,10 @@ enum var_name {
 
 static int query_formats(AVFilterContext *ctx)
 {
-    ff_set_common_formats(ctx, ff_draw_supported_pixel_formats(0));
-    return 0;
+    return ff_set_common_formats(ctx, ff_draw_supported_pixel_formats(0));
 }
 
-typedef struct {
+typedef struct PadContext {
     const AVClass *class;
     int w, h;               ///< output dimensions, a value of 0 will result in the input size
     int x, y;               ///< offsets of the input area with respect to the padded area

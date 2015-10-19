@@ -33,6 +33,7 @@
 #include "libavutil/replaygain.h"
 
 #include "avformat.h"
+#include "internal.h"
 #include "replaygain.h"
 
 static int32_t parse_value(const char *value, int32_t min)
@@ -66,39 +67,18 @@ static int32_t parse_value(const char *value, int32_t min)
     return db * 100000 + sign * mb;
 }
 
-static int replaygain_export(AVStream *st,
-                             const uint8_t *track_gain, const uint8_t *track_peak,
-                             const uint8_t *album_gain, const uint8_t *album_peak)
+int ff_replaygain_export_raw(AVStream *st, int32_t tg, uint32_t tp,
+                             int32_t ag, uint32_t ap)
 {
-    AVPacketSideData *sd, *tmp;
     AVReplayGain *replaygain;
-    int32_t tg, ag;
-    uint32_t tp, ap;
-
-    tg = parse_value(track_gain, INT32_MIN);
-    ag = parse_value(album_gain, INT32_MIN);
-    tp = parse_value(track_peak, 0);
-    ap = parse_value(album_peak, 0);
 
     if (tg == INT32_MIN && ag == INT32_MIN)
         return 0;
 
-    replaygain = av_mallocz(sizeof(*replaygain));
+    replaygain = (AVReplayGain*)ff_stream_new_side_data(st, AV_PKT_DATA_REPLAYGAIN,
+                                                        sizeof(*replaygain));
     if (!replaygain)
         return AVERROR(ENOMEM);
-
-    tmp = av_realloc_array(st->side_data, st->nb_side_data + 1, sizeof(*tmp));
-    if (!tmp) {
-        av_freep(&replaygain);
-        return AVERROR(ENOMEM);
-    }
-    st->side_data = tmp;
-    st->nb_side_data++;
-
-    sd = &st->side_data[st->nb_side_data - 1];
-    sd->type = AV_PKT_DATA_REPLAYGAIN;
-    sd->data = (uint8_t*)replaygain;
-    sd->size = sizeof(*replaygain);
 
     replaygain->track_gain = tg;
     replaygain->track_peak = tp;
@@ -117,9 +97,9 @@ int ff_replaygain_export(AVStream *st, AVDictionary *metadata)
     ag = av_dict_get(metadata, "REPLAYGAIN_ALBUM_GAIN", NULL, 0);
     ap = av_dict_get(metadata, "REPLAYGAIN_ALBUM_PEAK", NULL, 0);
 
-    return replaygain_export(st,
-                             tg ? tg->value : NULL,
-                             tp ? tp->value : NULL,
-                             ag ? ag->value : NULL,
-                             ap ? ap->value : NULL);
+    return ff_replaygain_export_raw(st,
+                             parse_value(tg ? tg->value : NULL, INT32_MIN),
+                             parse_value(tp ? tp->value : NULL, 0),
+                             parse_value(ag ? ag->value : NULL, INT32_MIN),
+                             parse_value(ap ? ap->value : NULL, 0));
 }
